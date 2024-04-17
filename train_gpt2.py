@@ -1,11 +1,13 @@
 """
-Reference code for GPT-2 training and inference.
-Will save the model weights into files, to be read from C as initialization.
 
-References:
-1) the official GPT-2 TensorFlow implementation released by OpenAI:
+GPT-2 训练和推理的代码示例。
+将模型权重保存到文件中，作为初始化从 C 中读取。
+
+参考：
+
+1) OpenAI 官方发布的 GPT-2 TensorFlow 实现：
 https://github.com/openai/gpt-2/blob/master/src/model.py
-2) huggingface/transformers PyTorch implementation:
+2) Huggingface/transformers PyTorch 实现：
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
@@ -19,8 +21,10 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+# OpenAI 使用的 GELU 激活函数版本
+# GELU (Gaussian Error Linear Units)是一种激活函数，结合了 ReLU 和 Dropout 的优点，能够缓解梯度消失问题并提高模型的泛化能力。
 class NewGELU(nn.Module):
-    """Careful there are a few versions of GeLU, this one is the exact one used by OpenAI"""
+    # 前向传播时，对输入进行GELU变换并返回结果。
     def forward(self, input):
         return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
 

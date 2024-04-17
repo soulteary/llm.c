@@ -115,18 +115,36 @@ class CausalSelfAttention(nn.Module):
         # 返回因果自注意力的输出张量 y。
         return y
 
+# 实现了 GPT-2 中的多层感知机(MLP)部分
+# 定义了一个多层感知机模块，包含两个线性变换层和一个激活函数。
+# 它的作用是对输入向量进行非线性变换，将其映射到更高维度的中间表示，然后再映射回原始维度。
+# 这种变换可以增加模型的表达能力和非线性特征提取能力。
+# 在 Transformer 模型中，MLP 模块通常用于对注意力机制的输出进行进一步的非线性变换，以提高模型的性能。
+# MLP 继承自 nn.Module，表示这是一个 PyTorch 的神经网络模块。
 class MLP(nn.Module):
-
+    # 定义了 MLP 类的构造函数 __init__，接受一个 config 参数，用于配置 MLP 的超参数。
     def __init__(self, config):
+        # 调用 super().__init__() 来初始化父类 nn.Module 的构造函数。
         super().__init__()
+        # 定义了一个线性变换层 self.c_fc，将输入的嵌入向量 config.n_embd 维度映射到 4 * config.n_embd 维度。
+        # 这个线性变换层的作用是将输入向量转换为更高维度的中间表示。
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd)
+        # 定义了一个激活函数 self.gelu，使用 NewGELU 类的实例。
+        # NewGELU 是一个自定义的激活函数，类似于 GELU（高斯误差线性单元）。
         self.gelu    = NewGELU()
+        # 定义了一个线性变换层 self.c_proj，将中间表示的 4 * config.n_embd 维度映射回原始的嵌入向量维度 config.n_embd。
+        # 这个线性变换层的作用是将中间表示转换为与输入向量相同维度的输出向量。
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd)
 
+    # 定义了 MLP 类的前向传播函数 forward，接受一个输入张量 x。
     def forward(self, x):
+        # 将输入张量 x 通过线性变换层 self.c_fc 进行转换，得到中间表示。
         x = self.c_fc(x)
+        # 对中间表示应用激活函数 self.gelu，引入非线性变换。
         x = self.gelu(x)
+        # 将激活后的中间表示通过线性变换层 self.c_proj 进行转换，得到与输入向量相同维度的输出张量。
         x = self.c_proj(x)
+        # 返回转换后的输出张量 x。
         return x
 
 class Block(nn.Module):

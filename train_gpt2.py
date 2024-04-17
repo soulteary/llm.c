@@ -147,18 +147,42 @@ class MLP(nn.Module):
         # 返回转换后的输出张量 x。
         return x
 
+# 实现了 GPT-2 中的一个神经网络模块，表示 Transformer 模型中的一个基本块（block）。
+# 每个基本块由两个子层组成：多头自注意力层和前馈神经网络层。
+# 在每个子层之前使用Layer Normalization进行归一化。
+# 每个子层都使用了层归一化和残差连接，以加速训练并提高模型的性能。
+# 基本块的作用是对输入序列进行自注意力计算和非线性变换，提取高级特征并建立序列中不同位置之间的依赖关系。
+# 多个基本块的堆叠构成了 Transformer 模型的核心结构，使其能够处理复杂的自然语言处理任务。
+# Block 继承自 nn.Module，表示这是一个 PyTorch 的神经网络模块。
 class Block(nn.Module):
-
+    # 定义了 Block 类的构造函数 __init__，接受一个 config 参数，用于配置基本块的超参数。
     def __init__(self, config):
+        # 调用 super().__init__() 来初始化父类 nn.Module 的构造函数。
         super().__init__()
+        # 定义了第一个子层的层归一化（Layer Normalization）模块 self.ln_1，用于对输入进行归一化。
+        # 层归一化的目的是对每个样本的特征进行归一化，以加速训练并提高模型的泛化能力。
         self.ln_1 = nn.LayerNorm(config.n_embd)
+        # 定义了第一个子层的因果自注意力（Causal Self-Attention）模块 self.attn，用于对输入序列进行自注意力计算。
+        # CausalSelfAttention 类是之前定义的因果自注意力机制的实现。
         self.attn = CausalSelfAttention(config)
+        # 定义了第二个子层的层归一化模块 self.ln_2，用于对第一个子层的输出进行归一化。
         self.ln_2 = nn.LayerNorm(config.n_embd)
+        # 定义了第二个子层的多层感知机（MLP）模块 self.mlp，用于对第一个子层的输出进行非线性变换。
+        # MLP 类是之前定义的多层感知机的实现。
         self.mlp = MLP(config)
 
+    # 定义了 Block 类的前向传播函数 forward，接受一个输入张量 x。
     def forward(self, x):
+        # 对输入张量 x 进行第一个子层的计算。
+        # 首先对 x 进行层归一化，然后将归一化后的结果传入因果自注意力模块 self.attn 进行计算。
+        # 将因果自注意力的输出与原始输入 x 相加，得到第一个子层的输出。
+        # 这种残差连接（residual connection）的目的是避免网络退化并加速训练。
         x = x + self.attn(self.ln_1(x))
+        # 对第一个子层的输出进行第二个子层的计算。
+        # 首先对第一个子层的输出进行层归一化，然后将归一化后的结果传入多层感知机模块 self.mlp 进行非线性变换。
+        # 将多层感知机的输出与第一个子层的输出相加，得到第二个子层的输出，同样使用残差连接。
         x = x + self.mlp(self.ln_2(x))
+        # 返回基本块的最终输出张量 x。
         return x
 
 @dataclass

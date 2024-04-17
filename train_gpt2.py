@@ -28,38 +28,91 @@ class NewGELU(nn.Module):
     def forward(self, input):
         return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
 
-class CausalSelfAttention(nn.Module):
 
+# 实现了 GPT-2 中的因果自注意力机制
+# 因果自注意力机制中为防止信息泄露，只允许每个位置的 token 与其之前的 token 进行交互。
+class CausalSelfAttention(nn.Module):
+    # 初始化了注意力机制所需的线性变换和参数。
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
+
+        # 定义了一个线性变换层 self.c_attn，用于计算注意力机制中的 Query、Key 和 Value 向量。
+        # config.n_embd 表示输入的嵌入维度大小，即每个 token 的嵌入向量的维度，3 * config.n_embd 表示输出的维度大小，是输入维度的 3 倍。
+        # 这个线性变换层的作用是将输入的嵌入向量映射到 Query、Key 和 Value 向量。
+        # 
+        # 由于是多头注意力机制，所以实际上是将输入映射到了所有注意力头的 Query、Key 和 Value 向量，并将它们在维度上拼接在一起。
+        # 假设有 n_head 个注意力头，每个头的维度为 head_dim，则 config.n_embd = n_head * head_dim，经过这个线性变换后，输出的维度为 3 * config.n_embd。
+        # 可以理解为 [n_head * head_dim_query, n_head * head_dim_key, n_head * head_dim_value] 的拼接。
+        # 在后续的代码中，会将这个输出再分割成 Query、Key 和 Value 向量，并分别计算注意力权重和值。
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        # output projection
+
+        # 输出投影
+        # 定义了一个线性变换层 self.c_proj，用于将注意力计算后的输出进行投影。
+        # 输入和输出的维度都为 config.n_embd，表示嵌入向量的维度。
+        # 这个投影层的作用是将注意力计算后的结果转换为与输入相同维度的向量，以便与输入进行残差连接。
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        # regularization
+
+        # 正则化
+        # 存储了配置中的注意力头数 config.n_head 和嵌入维度 config.n_embd。
+        # 这些参数在计算注意力时会用到，例如将输入拆分为多个注意力头，以及确保嵌入维度与注意力计算的维度匹配。
         self.n_head = config.n_head
         self.n_embd = config.n_embd
+        
+        
+        # 定义了一个名为 bias 的缓冲区，用于存储注意力掩码。
+        # 使用 torch.tril 函数创建了一个下三角矩阵，大小为 (config.block_size, config.block_size)，表示序列长度与序列长度之间的掩码。
+        # 下三角矩阵中的元素为1，表示允许注意力在当前位置及其之前的位置之间流动。
+        # 使用 view 函数将下三角矩阵重塑为 (1, 1, config.block_size, config.block_size) 的形状，以便在注意力计算时广播到批次和头的维度。
+        # 这个掩码的作用是确保在因果自注意力中，每个位置只能与其之前的位置进行交互，防止信息泄露。
+        # 作者吐槽：虽然命名为 bias，但实际上它更像是一个掩码，用于掩盖注意力权重矩阵中的特定位置。这里沿用了 OpenAI 和 Hugging Face 的命名习惯。
         # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                      .view(1, 1, config.block_size, config.block_size))
 
+    # 方法对输入进行自注意力计算（因果自注意力机制的前向传播函数），并返回结果。
+    # - 将输入通过线性变换得到 Query、Key、Value。
+    # - 计算注意力权重矩阵，并使用 bias 掩码进行因果掩码，防止信息泄露。
+    # - 对注意力权重进行 softmax 归一化。
+    # - 将注意力权重与 Value 相乘，得到注意力输出。
+    # - 对注意力输出进行线性变换，得到最终的输出。
     def forward(self, x):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        # 获取输入张量 x 的维度信息：批次大小 B、序列长度 T 和嵌入维度 C（即 config.n_embd）。
+        B, T, C = x.size()
+        # 将输入张量 x 通过线性变换层 self.c_attn 计算 Query、Key 和 Value 向量。
+        # 输出张量 qkv 的维度为 (B, T, 3 * C)，其中包含了所有注意力头的 Query、Key 和 Value 向量的拼接。
         qkv = self.c_attn(x)
+        # 将 qkv 张量沿着第二个维度（即嵌入维度）拆分为 Query、Key 和 Value 向量。
+        # 拆分后的 q、k、v 张量的维度均为 (B, T, C)。
         q, k, v = qkv.split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        # manual implementation of attention
+        # 将 Query、Key 和 Value 向量重塑为多头形式，并调整维度顺序。
+        # 使用 view 函数将张量重塑为 (B, T, self.n_head, C // self.n_head) 的形状，其中 self.n_head 表示注意力头的数量，C // self.n_head 表示每个头的维度大小。
+        # 使用 transpose 函数将第二个维度（序列长度）和第三个维度（注意力头）进行交换，得到 (B, self.n_head, T, C // self.n_head) 的形状。
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        # 计算注意力权重矩阵 att。
+        # 将 Query 矩阵 q 与 Key 矩阵 k 的转置进行矩阵乘法，得到注意力得分矩阵。
+        # 将注意力得分矩阵除以 Key 向量维度的平方根，作为缩放因子，以稳定梯度。
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # 将注意力权重矩阵 att 中被掩码的位置填充为负无穷大。
+        # 使用 self.bias 张量作为掩码，将其中为0的位置对应的注意力权重设置为负无穷大，以防止在因果自注意力中出现信息泄露。
         att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        # 对注意力权重矩阵 att 应用 softmax 函数，将其归一化为概率分布。
+        # 在最后一个维度上应用 softmax，即在序列长度维度上进行归一化。
         att = F.softmax(att, dim=-1)
-        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        # 将注意力权重矩阵 att 与 Value 矩阵 v 进行矩阵乘法，得到注意力输出 y。
+        # 注意力权重矩阵的维度为 (B, nh, T, T)，Value 矩阵的维度为 (B, nh, T, hs)，乘法结果的维度为 (B, nh, T, hs)。
+        y = att @ v
+        # 将注意力输出 y 的维度调整回原始顺序。
+        # 使用 transpose 函数将第二个维度（注意力头）和第三个维度（序列长度）进行交换，得到 (B, T, nh, hs) 的形状。
+        # 使用 contiguous 函数确保张量在内存中是连续的。
+        # 使用 view 函数将张量重塑为 (B, T, C) 的形状，将所有注意力头的输出并排放置。
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-        # output projection
+        # 将注意力输出 y 通过线性变换层 self.c_proj 进行输出投影。
+        # 输出投影的目的是将注意力输出的维度调整为与输入张量 x 相同的维度 (B, T, C)。
         y = self.c_proj(y)
+        # 返回因果自注意力的输出张量 y。
         return y
 
 class MLP(nn.Module):
